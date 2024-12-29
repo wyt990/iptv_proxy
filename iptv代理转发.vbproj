@@ -23,7 +23,12 @@
     <OptionCompare>Binary</OptionCompare>
     <OptionInfer>On</OptionInfer>
     <Platforms>AnyCPU</Platforms>
+    <ApplicationIcon>2.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="2.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <Import Include="System.Data" />
