@@ -83,33 +83,56 @@ Namespace IPTV代理转发
         End Sub
 
         Public Sub 停止()
-            ' 1. 先停止代理服务器
-            运行中 = False
-            监听器.Stop()
-            
-            ' 2. 清理所有活动连接
-            For Each kvp In 活动连接.ToList()
-                Dim 连接状态 As 连接状态 = Nothing
-                If 活动连接.TryRemove(kvp.Key, 连接状态) Then
-                    主窗体引用.添加日志($"清理连接: {kvp.Key}")
-                    Dim 状态 = 减少连接计数(kvp.Key)
-                    If 状态 IsNot Nothing Then
-                        安全更新UI(kvp.Key, 状态.连接数, "已停止", "0 MB/s")
-                    End If
+            Try
+                ' 1. 先停止代理服务器
+                运行中 = False
+
+                ' 2. 停止并清理定时器
+                If 连接检查定时器 IsNot Nothing Then
+                    连接检查定时器.Dispose()
+                    连接检查定时器 = Nothing
                 End If
-            Next
 
-            ' 3. 清空连接计数器
-            SyncLock 连接计数器
-                连接计数器.Clear()
-            End SyncLock
+                If 带宽更新定时器 IsNot Nothing Then
+                    带宽更新定时器.Dispose()
+                End If
 
-            ' 4. 最后停止并清理定时器
-            If 连接检查定时器 IsNot Nothing Then
-                连接检查定时器.Dispose()
-                连接检查定时器 = Nothing
-                主窗体引用.添加日志("连接检查定时器已停止")
-            End If
+                ' 3. 清理所有活动连接
+                For Each kvp In 活动连接.ToList()
+                    Try
+                        Dim 连接状态 As 连接状态 = Nothing
+                        If 活动连接.TryRemove(kvp.Key, 连接状态) Then
+                            Dim 状态 = 减少连接计数(kvp.Key)
+                            If 状态 IsNot Nothing Then
+                                安全更新UI(kvp.Key, 状态.连接数, "已停止", "0 MB/s")
+                            End If
+                        End If
+                    Catch ex As Exception
+                        主窗体引用.添加日志($"清理连接时出错: {ex.Message}")
+                    End Try
+                Next
+
+                ' 4. 清空连接计数器和其他集合
+                SyncLock 连接计数器
+                    连接计数器.Clear()
+                End SyncLock
+
+                连接流量统计.Clear()
+                频道带宽统计.Clear()
+                TS频道映射.Clear()
+
+                ' 5. 最后停止监听器
+                Try
+                    监听器.Stop()
+                Catch ex As Exception
+                    ' 忽略停止监听器时的错误
+                End Try
+
+                主窗体引用.添加日志("代理服务器已停止")
+
+            Catch ex As Exception
+                主窗体引用.添加日志($"停止代理服务器时出错: {ex.Message}")
+            End Try
         End Sub
 
         ' 修改为 Async Function 返回 Task
@@ -134,7 +157,7 @@ Namespace IPTV代理转发
         Private Async Function 处理客户端(client As TcpClient) As Task
             Using client
                 Try
-                    主窗体引用.添加日志("新客户端连接")
+                    '主窗体引用.添加日志("新客户端连接")
                     Dim stream = client.GetStream()
                     Dim request = Await 读取HTTP请求(stream)
 
@@ -144,7 +167,7 @@ Namespace IPTV代理转发
                         Return
                     End If
 
-                    主窗体引用.添加日志($"客户端请求URL: {url}")
+                    '主窗体引用.添加日志($"客户端请求URL: {url}")
 
                     If Not 是否允许代理(url) Then
                         主窗体引用.添加日志("代理未启用")
@@ -152,10 +175,10 @@ Namespace IPTV代理转发
                     End If
 
                     If url.Contains(".m3u8") Then
-                        主窗体引用.添加日志("处理M3U8请求")
+                        '主窗体引用.添加日志("处理M3U8请求")
                         Await 处理M3U8请求(stream, url)
                     ElseIf url.Contains(".ts") Then
-                        主窗体引用.添加日志("处理TS请求")
+                        '主窗体引用.添加日志("处理TS请求")
                         Await 处理TS请求(stream, url)
                     End If
 
@@ -219,7 +242,7 @@ Namespace IPTV代理转发
                 ' 通过主窗体方法更新UI
                 主窗体引用.更新频道连接数(基础URL, 连接计数器(基础URL))
 
-                主窗体引用.添加日志($"频道 {基础URL} 连接数增加到: {连接计数器(基础URL)}")
+                '主窗体引用.添加日志($"频道 {基础URL} 连接数增加到: {连接计数器(基础URL)}")
                 Return New 状态更新数据 With {
                     .连接数 = 连接计数器(基础URL).ToString(),
                     .状态 = "运行中",
@@ -249,7 +272,7 @@ Namespace IPTV代理转发
                 ' 更新连接计数
                 If 连接计数器.ContainsKey(基础URL) Then
                     连接计数器(基础URL) -= 1
-                    主窗体引用.添加日志($"频道 {基础URL} 连接数减少到: {连接计数器(基础URL)}")
+                    '主窗体引用.添加日志($"频道 {基础URL} 连接数减少到: {连接计数器(基础URL)}")
 
                     If 连接计数器(基础URL) <= 0 Then
                         连接计数器.Remove(基础URL)
@@ -335,14 +358,14 @@ Namespace IPTV代理转发
                 Dim isNewConnection = False
                 Dim 连接 = 活动连接.GetOrAdd(url, Function(key)
                                                 isNewConnection = True
-                                                主窗体引用.添加日志($"创建新M3U8连接: {url}")
+                                                '主窗体引用.添加日志($"创建新M3U8连接: {url}")
                                                 Return New 连接状态(url, True)
                                             End Function)
 
                 ' 如果是新M3U8连接，增加计数
                 If isNewConnection Then
                     Dim 状态 = 增加连接计数(url)
-                    主窗体引用.添加日志($"新M3U8连接计数: {url} -> {状态.连接数}")
+                    '主窗体引用.添加日志($"新M3U8连接计数: {url} -> {状态.连接数}")
                     安全更新UI(url, 状态.连接数, 状态.状态, 状态.带宽)
                 End If
 
@@ -406,7 +429,6 @@ Namespace IPTV代理转发
             Try
                 ' 获取或创建连接状态
                 Dim 连接 = 活动连接.GetOrAdd(url, Function(key)
-                                                主窗体引用.添加日志($"创建新TS连接: {url}")
                                                 Return New 连接状态(url, False)
                                             End Function)
 
@@ -416,47 +438,74 @@ Namespace IPTV代理转发
                 ' 更新最后活动时间
                 连接.最后活动时间 = DateTime.Now
 
-                Using response = Await httpClient.GetAsync(url)
-                    response.EnsureSuccessStatusCode()
+                ' 添加取消令牌以支持超时
+                Using cts As New CancellationTokenSource(TimeSpan.FromSeconds(设置管理器.超时时间))
+                    Try
+                        Using response = Await httpClient.GetAsync(url, cts.Token)
+                            response.EnsureSuccessStatusCode()
 
-                    ' 发送HTTP响应头
-                    Dim headers = "HTTP/1.1 200 OK" & vbCrLf &
+                            ' 发送HTTP响应头
+                            Dim headers = "HTTP/1.1 200 OK" & vbCrLf &
                          "Content-Type: video/MP2T" & vbCrLf &
                          "Connection: close" & vbCrLf & vbCrLf
 
-                    Dim headerBytes = Text.Encoding.ASCII.GetBytes(headers)
-                    Await stream.WriteAsync(headerBytes, 0, headerBytes.Length)
+                            Dim headerBytes = Text.Encoding.ASCII.GetBytes(headers)
+                            Await stream.WriteAsync(headerBytes, 0, headerBytes.Length, cts.Token)
 
-                    ' 流式传输ts内容并统计流量
-                    Using responseStream = Await response.Content.ReadAsStreamAsync()
-                        Dim buffer(8191) As Byte
-                        Dim bytesRead As Integer
+                            ' 流式传输ts内容并统计流量
+                            Using responseStream = Await response.Content.ReadAsStreamAsync()
+                                Dim buffer(8191) As Byte
+                                Dim bytesRead As Integer
 
-                        Do
-                            bytesRead = Await responseStream.ReadAsync(buffer, 0, buffer.Length)
-                            If bytesRead > 0 Then
-                                Await stream.WriteAsync(buffer, 0, bytesRead)
+                                Do
+                                    Try
+                                        bytesRead = Await responseStream.ReadAsync(buffer, 0, buffer.Length, cts.Token)
+                                        If bytesRead > 0 Then
+                                            Await stream.WriteAsync(buffer, 0, bytesRead, cts.Token)
 
-                                ' 累计流量
-                                流量数据.累计字节数 += bytesRead
+                                            ' 累计流量
+                                            流量数据.累计字节数 += bytesRead
 
-                                ' 计算当前带宽（MB/s）
-                                Dim 经过时间 = (DateTime.Now - 流量数据.开始时间).TotalSeconds
-                                If 经过时间 > 0 Then
-                                    Dim 带宽 = (流量数据.累计字节数 / 1024 / 1024) / 经过时间
-                                    频道带宽统计.AddOrUpdate(url, 带宽, Function(key, old) 带宽)
-                                End If
+                                            ' 计算当前带宽（MB/s）
+                                            Dim 经过时间 = (DateTime.Now - 流量数据.开始时间).TotalSeconds
+                                            If 经过时间 > 0 Then
+                                                Dim 带宽 = (流量数据.累计字节数 / 1024 / 1024) / 经过时间
+                                                频道带宽统计.AddOrUpdate(url, 带宽, Function(key, old) 带宽)
+                                            End If
 
-                                ' 更新最后活动时间
-                                连接.最后活动时间 = DateTime.Now
-                            End If
-                        Loop While bytesRead > 0
-                    End Using
+                                            ' 更新最后活动时间
+                                            连接.最后活动时间 = DateTime.Now
+                                        End If
+                                    Catch ex As OperationCanceledException
+                                        ' 处理超时或取消
+                                        Exit Do
+                                    Catch ex As IOException
+                                        ' 处理网络错误
+                                        Exit Do
+                                    End Try
+                                Loop While bytesRead > 0
+                            End Using
+                        End Using
+                    Catch ex As OperationCanceledException
+                        ' 处理超时
+                        主窗体引用.添加日志($"TS请求超时: {url}")
+                    Catch ex As HttpRequestException
+                        ' 处理HTTP请求错误
+                        主窗体引用.添加日志($"TS请求HTTP错误: {ex.Message}")
+                    End Try
                 End Using
 
+            Catch ex As Exception When TypeOf ex Is SocketException OrElse
+                            TypeOf ex Is ObjectDisposedException OrElse
+                            TypeOf ex Is IOException
+                ' 处理网络相关错误
+                主窗体引用.添加日志($"TS请求网络错误: {ex.Message}")
             Catch ex As Exception
                 主窗体引用.添加日志($"处理TS请求失败: {ex.Message}")
-                Throw
+            Finally
+                ' 清理连接状态
+                Dim 连接状态 As 连接状态 = Nothing
+                活动连接.TryRemove(url, 连接状态)
             End Try
         End Function
 
@@ -476,8 +525,8 @@ Namespace IPTV代理转发
         Private Sub 检查连接超时(state As Object)
             Try
                 Dim 当前时间 = DateTime.Now
-                主窗体引用.添加日志("开始检查连接超时...")
-                主窗体引用.添加日志($"当前活动连接数: {活动连接.Count}")
+                '主窗体引用.添加日志("开始检查连接超时...")
+                '主窗体引用.添加日志($"当前活动连接数: {活动连接.Count}")
 
                 Dim 需要移除的连接 As New List(Of String)
 
@@ -485,25 +534,25 @@ Namespace IPTV代理转发
                 For Each kvp In 活动连接
                     Dim 连接 = kvp.Value
                     Dim 空闲时间 = 当前时间 - 连接.最后活动时间
-                    主窗体引用.添加日志($"检查连接: {kvp.Key}, 空闲时间: {空闲时间.TotalSeconds:F1}秒, 是否M3U8: {连接.是M3U8连接}")
+                    '主窗体引用.添加日志($"检查连接: {kvp.Key}, 空闲时间: {空闲时间.TotalSeconds:F1}秒, 是否M3U8: {连接.是M3U8连接}")
 
                     ' 降低超时时间阈值，并且只检查M3U8连接
                     If 空闲时间.TotalSeconds >= 设置管理器.超时时间 AndAlso 连接.是M3U8连接 Then
-                        主窗体引用.添加日志($"M3U8连接超时，准备移除: {kvp.Key}")
+                        '主窗体引用.添加日志($"M3U8连接超时，准备移除: {kvp.Key}")
                         需要移除的连接.Add(kvp.Key)
                     End If
                 Next
 
-                主窗体引用.添加日志($"需要移除的连接数: {需要移除的连接.Count}")
+                '主窗体引用.添加日志($"需要移除的连接数: {需要移除的连接.Count}")
 
                 ' 移除超时连接
                 For Each url In 需要移除的连接
                     Dim 连接状态 As 连接状态 = Nothing
                     If 活动连接.TryRemove(url, 连接状态) Then
-                        主窗体引用.添加日志($"移除超时M3U8连接: {url}")
+                        '主窗体引用.添加日志($"移除超时M3U8连接: {url}")
                         Dim 状态 = 减少连接计数(url)
                         If 状态 IsNot Nothing Then
-                            主窗体引用.添加日志($"更新连接计数: {url} -> {状态.连接数}")
+                            '主窗体引用.添加日志($"更新连接计数: {url} -> {状态.连接数}")
                             安全更新UI(url, 状态.连接数, 状态.状态, 状态.带宽)
                         End If
                     End If
@@ -548,43 +597,67 @@ Namespace IPTV代理转发
 
                 ' 遍历所有频道的流量统计
                 For Each kvp In 连接流量统计.ToList()
-                    Dim url = kvp.Key
-                    Dim 流量数据 = kvp.Value
+                    Try  ' 添加内部的Try-Catch以处理单个频道的错误
+                        Dim url = kvp.Key
+                        Dim 流量数据 = kvp.Value
 
-                    ' 获取对应的M3U8 URL
-                    Dim m3u8Url = url
-                    If url.Contains(".ts") Then
-                        If TS频道映射.TryGetValue(url, Nothing) Then
-                            m3u8Url = TS频道映射(url)
+                        ' 获取对应的M3U8 URL
+                        Dim m3u8Url = url
+                        If url.Contains(".ts") Then
+                            If TS频道映射.TryGetValue(url, Nothing) Then
+                                m3u8Url = TS频道映射(url)
+                            Else
+                                Continue For  ' 如果找不到映射，跳过这个连接
+                            End If
                         End If
-                    End If
 
-                    ' 计算带宽
-                    Dim 经过时间 = (DateTime.Now - 流量数据.开始时间).TotalSeconds
-                    If 经过时间 > 0 Then
-                        Dim 带宽 = (流量数据.累计字节数 / 1024 / 1024) / 经过时间
+                        ' 计算带宽
+                        Dim 经过时间 = (DateTime.Now - 流量数据.开始时间).TotalSeconds
+                        If 经过时间 > 0 Then
+                            Dim 带宽 = (流量数据.累计字节数 / 1024 / 1024) / 经过时间
 
-                        ' 累加到频道总带宽
-                        If Not 频道总带宽.ContainsKey(m3u8Url) Then
-                            频道总带宽(m3u8Url) = 0
+                            ' 累加到频道总带宽
+                            SyncLock 频道总带宽
+                                If Not 频道总带宽.ContainsKey(m3u8Url) Then
+                                    频道总带宽(m3u8Url) = 0
+                                End If
+                                频道总带宽(m3u8Url) = 带宽  ' 使用最新的带宽值
+                            End SyncLock
+
+                            ' 更新频道带宽统计
+                            频道带宽统计.AddOrUpdate(m3u8Url, 带宽, Function(key, old) 带宽)
+
+                            ' 更新UI显示 - 添加安全检查
+                            SyncLock 连接计数器
+                                Dim 连接数 = If(连接计数器.ContainsKey(m3u8Url),
+                            连接计数器(m3u8Url).ToString(),
+                            "0")
+
+                                ' 获取当前频道的带宽
+                                Dim 当前带宽 As Double = 0
+                                If 频道总带宽.TryGetValue(m3u8Url, 当前带宽) Then
+                                    安全更新UI(m3u8Url, 连接数, "运行中", $"{当前带宽:F2} MB/s")
+                                End If
+                            End SyncLock
                         End If
-                        频道总带宽(m3u8Url) += 带宽
 
-                        ' 更新频道带宽统计
-                        频道带宽统计.AddOrUpdate(m3u8Url, 带宽, Function(key, old) 带宽)
-
-                        ' 更新UI显示
-                        安全更新UI(m3u8Url, 连接计数器(m3u8Url).ToString(), "运行中", $"{频道总带宽(m3u8Url):F2} MB/s")
-                    End If
+                    Catch ex As Exception
+                        ' 记录单个频道处理错误但继续处理其他频道
+                        主窗体引用.添加日志($"处理频道带宽时出错: {ex.Message}")
+                        Continue For
+                    End Try
                 Next
 
                 ' 计算总带宽（使用频道总带宽的和）
-                Dim 总带宽 = 频道总带宽.Values.Sum()
-                主窗体引用.更新总带宽(总带宽)
+                SyncLock 频道总带宽
+                    Dim 总带宽 = 频道总带宽.Values.Sum()
+                    主窗体引用.更新总带宽(总带宽)
+                End SyncLock
 
             Catch ex As Exception
                 主窗体引用.添加日志($"更新带宽统计时出错: {ex.Message}")
             End Try
         End Sub
+
     End Class
 End Namespace
