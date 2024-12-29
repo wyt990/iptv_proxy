@@ -136,7 +136,8 @@ Namespace IPTV代理转发
             带宽限制输入框.Text = 设置管理器.带宽限制.ToString()
             自动启动复选框.Checked = 设置管理器.自动启动
         End Sub
-
+        ' 在 代理设置窗体.vb 中添加事件声明
+        Public Event 设置已更改()
         Private Sub 确定按钮_Click(sender As Object, e As EventArgs)
             Try
                 ' 验证输入
@@ -179,6 +180,9 @@ Namespace IPTV代理转发
                 设置管理器.自动启动 = 自动启动复选框.Checked
 
                 设置管理器.保存设置()
+
+                ' 触发设置更改事件
+                RaiseEvent 设置已更改()
                 DialogResult = DialogResult.OK
                 Close()
             Catch ex As Exception

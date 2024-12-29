@@ -19,6 +19,13 @@ Namespace IPTV代理转发
         Private ReadOnly 时间戳URL映射 As New Dictionary(Of String, String)
         Private WithEvents 连接检查定时器 As Timer
 
+        ' 在代理服务器类中添加公共属性
+        Public ReadOnly Property 运行中状态 As Boolean
+            Get
+                Return 运行中
+            End Get
+        End Property
+
         ' 用于流量统计的时间戳
         Private ReadOnly TS频道映射 As New ConcurrentDictionary(Of String, String)()  ' 用于带宽统计的TS文件到频道的映射
         ' 记录每个连接的流量统计
@@ -248,7 +255,7 @@ Namespace IPTV代理转发
                         连接计数器.Remove(基础URL)
                         Return New 状态更新数据 With {
                             .连接数 = "0",
-                            .状态 = "已停止",
+                            .状态 = "运行中",
                             .带宽 = "0 MB/s"
                         }
                     Else

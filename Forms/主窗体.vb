@@ -666,6 +666,8 @@ Namespace IPTV代理转发
         ' 代理设置相关方法
         Private Sub 代理设置_Click(sender As Object, e As EventArgs)
             Using dialog As New 代理设置窗体()
+                ' 添加设置更改事件处理
+                AddHandler dialog.设置已更改, AddressOf 更新代理地址
                 dialog.ShowDialog()
             End Using
         End Sub
@@ -1366,6 +1368,46 @@ Namespace IPTV代理转发
             Catch ex As Exception
                 添加日志($"加载频道列表失败: {ex.Message}")
                 MessageBox.Show($"加载频道列表失败: {ex.Message}", "错误",
+                              MessageBoxButtons.OK, MessageBoxIcon.Error)
+            End Try
+        End Sub
+
+        ' 在主窗体.vb中添加以下方法
+        Private Sub 更新代理地址()
+            Try
+                ' 获取新的监听地址和端口
+                Dim 新监听地址 As String = 设置管理器.监听地址
+                Dim 新监听端口 As Integer = 设置管理器.监听端口
+
+                ' 更新所有频道的代理地址
+                For Each row As DataGridViewRow In 频道列表.Rows
+                    Dim 频道地址 As String = row.Cells("频道地址").Value.ToString()
+                    Dim 新代理地址 As String = 生成代理地址(频道地址)
+                    row.Cells("代理地址").Value = 新代理地址
+                Next
+
+                ' 保存更新后的频道列表
+                保存频道列表()
+
+                添加日志("已更新所有频道的代理地址")
+
+                ' 如果代理服务器正在运行，则重启它
+                'If 代理服务器实例 IsNot Nothing AndAlso 代理服务器实例.运行中 Then
+                If 代理服务器实例 IsNot Nothing AndAlso 代理服务器实例.运行中状态 Then
+                    添加日志("正在重启代理服务器以应用新设置...")
+
+                    ' 停止代理服务器
+                    开启停止代理_Click(Nothing, Nothing)
+
+                    ' 重新启动代理服务器
+                    开启停止代理_Click(Nothing, Nothing)
+
+                    添加日志("代理服务器已重启")
+                End If
+
+            Catch ex As Exception
+                添加日志($"更新代理地址时出错: {ex.Message}")
+                MessageBox.Show($"更新代理地址时出错: {ex.Message}", "错误",
                               MessageBoxButtons.OK, MessageBoxIcon.Error)
             End Try
         End Sub
