@@ -18,6 +18,7 @@ Namespace IPTV代理转发
         Private ReadOnly httpClient As New HttpClient() ' 添加 HttpClient 实例
         Private ReadOnly 时间戳URL映射 As New Dictionary(Of String, String)
         Private WithEvents 连接检查定时器 As Timer
+        Private ReadOnly TS预加载缓存 As New ConcurrentDictionary(Of String, Byte())
 
         ' 在代理服务器类中添加公共属性
         Public ReadOnly Property 运行中状态 As Boolean
@@ -68,7 +69,19 @@ Namespace IPTV代理转发
             监听器 = New TcpListener(IPAddress.Parse(设置管理器.监听地址), 设置管理器.监听端口)
 
             ' 配置 HttpClient
-            httpClient.Timeout = TimeSpan.FromSeconds(设置管理器.超时时间)
+            Dim handler = New HttpClientHandler() With {
+        .MaxConnectionsPerServer = 设置管理器.最大连接数,
+        .UseProxy = False,
+        .AutomaticDecompression = DecompressionMethods.GZip Or DecompressionMethods.Deflate
+    }
+
+            httpClient = New HttpClient(handler) With {
+        .Timeout = TimeSpan.FromSeconds(设置管理器.超时时间)
+    }
+
+            ' 设置默认请求头
+            httpClient.DefaultRequestHeaders.Add("Connection", "keep-alive")
+            httpClient.DefaultRequestHeaders.Add("Keep-Alive", "timeout=600")
         End Sub
 
         Public Sub 启动()
@@ -304,7 +317,10 @@ Namespace IPTV代理转发
 
         Private Async Function 读取HTTP请求(stream As NetworkStream) As Task(Of String)
             Try
-                Dim buffer(8191) As Byte
+                'Dim buffer(8191) As Byte
+                ' 使用设置中的缓冲大小
+                Dim bufferSize As Integer = 设置管理器.缓冲大小 * 1024  ' 转换为字节
+                Dim buffer(bufferSize - 1) As Byte
                 Dim requestBuilder As New Text.StringBuilder()
                 Dim bytesRead As Integer
 
@@ -358,57 +374,67 @@ Namespace IPTV代理转发
                 Dim isNewConnection = False
                 Dim 连接 = 活动连接.GetOrAdd(url, Function(key)
                                                 isNewConnection = True
-                                                '主窗体引用.添加日志($"创建新M3U8连接: {url}")
                                                 Return New 连接状态(url, True)
                                             End Function)
 
                 ' 如果是新M3U8连接，增加计数
                 If isNewConnection Then
                     Dim 状态 = 增加连接计数(url)
-                    '主窗体引用.添加日志($"新M3U8连接计数: {url} -> {状态.连接数}")
                     安全更新UI(url, 状态.连接数, 状态.状态, 状态.带宽)
                 End If
 
                 ' 更新最后活动时间
                 连接.最后活动时间 = DateTime.Now
 
-                Using response = Await httpClient.GetAsync(url)
+                Using response = Await httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead)
                     response.EnsureSuccessStatusCode()
                     Dim content = Await response.Content.ReadAsStringAsync()
 
                     Dim baseUrl = url.Substring(0, url.LastIndexOf("/") + 1)
-                    ' 移除处理M3U8的日志
-                    ' 主窗体引用.添加日志($"处理M3U8: {baseUrl}")
-
                     Dim lines = content.Split(vbLf)
+                    Dim tsUrls As New List(Of String)  ' 存储所有TS文件的URL
+
+                    ' 处理M3U8内容
                     For Each line In lines
                         If line.Trim().Contains(".ts?") Then
                             Dim tsFile = line.Trim()
                             Dim tsFileName = tsFile.Substring(0, tsFile.IndexOf("?"))
                             Dim fullTsUrl = If(tsFile.StartsWith("http"), tsFile, baseUrl & tsFile)
+
+                            ' 记录TS文件映射
                             SyncLock 时间戳URL映射
-                                '时间戳URL映射(tsFileName) = fullTsUrl
                                 时间戳URL映射(tsFileName) = fullTsUrl
                             End SyncLock
 
-                            ' 用于流量统计的时间戳
-                            TS频道映射(fullTsUrl) = url  ' 将完整的TS URL映射到M3U8频道URL
+                            ' 记录用于带宽统计的映射
+                            TS频道映射(fullTsUrl) = url
+
+                            ' 添加到预加载列表
+                            tsUrls.Add(fullTsUrl)
                         End If
                     Next
 
-                    ' 发送响应
+                    ' 发送响应头
                     Dim headers = "HTTP/1.1 200 OK" & vbCrLf &
-                                 "Content-Type: application/vnd.apple.mpegurl" & vbCrLf &
-                                 "Connection: close" & vbCrLf & vbCrLf
+                         "Content-Type: application/vnd.apple.mpegurl" & vbCrLf &
+                         "Connection: close" & vbCrLf & vbCrLf
 
                     Dim headerBytes = Text.Encoding.ASCII.GetBytes(headers)
                     Await stream.WriteAsync(headerBytes, 0, headerBytes.Length)
 
+                    ' 发送M3U8内容
                     Dim contentBytes = Text.Encoding.UTF8.GetBytes(content)
                     Await stream.WriteAsync(contentBytes, 0, contentBytes.Length)
-                    ' 移除M3U8响应的日志
-                    ' 主窗体引用.添加日志($"M3U8响应: {contentBytes.Length} 字节")
+
+                    ' 预加载前两个TS文件
+                    If tsUrls.Count > 0 Then
+                        预加载TS文件(tsUrls(0))
+                        If tsUrls.Count > 1 Then
+                            预加载TS文件(tsUrls(1))
+                        End If
+                    End If
                 End Using
+
             Catch ex As Exception
                 主窗体引用.添加日志($"处理M3U8请求失败: {ex.Message}")
                 Throw
@@ -441,64 +467,79 @@ Namespace IPTV代理转发
                 ' 添加取消令牌以支持超时
                 Using cts As New CancellationTokenSource(TimeSpan.FromSeconds(设置管理器.超时时间))
                     Try
-                        Using response = Await httpClient.GetAsync(url, cts.Token)
-                            response.EnsureSuccessStatusCode()
-
+                        ' 检查是否有预加载的内容
+                        Dim 预加载内容 As Byte() = Nothing
+                        If TS预加载缓存.TryRemove(url, 预加载内容) Then
+                            ' 使用预加载的内容
                             ' 发送HTTP响应头
                             Dim headers = "HTTP/1.1 200 OK" & vbCrLf &
-                         "Content-Type: video/MP2T" & vbCrLf &
-                         "Connection: close" & vbCrLf & vbCrLf
+                                "Content-Type: video/MP2T" & vbCrLf &
+                                "Connection: close" & vbCrLf & vbCrLf
 
                             Dim headerBytes = Text.Encoding.ASCII.GetBytes(headers)
                             Await stream.WriteAsync(headerBytes, 0, headerBytes.Length, cts.Token)
 
-                            ' 流式传输ts内容并统计流量
-                            Using responseStream = Await response.Content.ReadAsStreamAsync()
-                                Dim buffer(8191) As Byte
-                                Dim bytesRead As Integer
+                            ' 发送预加载的内容
+                            Await stream.WriteAsync(预加载内容, 0, 预加载内容.Length, cts.Token)
 
-                                Do
-                                    Try
-                                        bytesRead = Await responseStream.ReadAsync(buffer, 0, buffer.Length, cts.Token)
-                                        If bytesRead > 0 Then
-                                            Await stream.WriteAsync(buffer, 0, bytesRead, cts.Token)
+                            ' 更新流量统计
+                            流量数据.累计字节数 += 预加载内容.Length
+                        Else
+                            ' 如果没有预加载内容，正常请求
+                            Using response = Await httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cts.Token)
+                                response.EnsureSuccessStatusCode()
 
-                                            ' 累计流量
-                                            流量数据.累计字节数 += bytesRead
+                                ' 发送HTTP响应头
+                                Dim headers = "HTTP/1.1 200 OK" & vbCrLf &
+                                    "Content-Type: video/MP2T" & vbCrLf &
+                                    "Connection: close" & vbCrLf & vbCrLf
 
-                                            ' 计算当前带宽（MB/s）
-                                            Dim 经过时间 = (DateTime.Now - 流量数据.开始时间).TotalSeconds
-                                            If 经过时间 > 0 Then
-                                                Dim 带宽 = (流量数据.累计字节数 / 1024 / 1024) / 经过时间
-                                                频道带宽统计.AddOrUpdate(url, 带宽, Function(key, old) 带宽)
+                                Dim headerBytes = Text.Encoding.ASCII.GetBytes(headers)
+                                Await stream.WriteAsync(headerBytes, 0, headerBytes.Length, cts.Token)
+
+                                ' 流式传输ts内容并统计流量
+                                Using responseStream = Await response.Content.ReadAsStreamAsync()
+                                    Dim bufferSize As Integer = 设置管理器.缓冲大小 * 1024
+                                    Dim buffer(bufferSize - 1) As Byte
+                                    Dim bytesRead As Integer
+
+                                    Do
+                                        Try
+                                            bytesRead = Await responseStream.ReadAsync(buffer, 0, buffer.Length, cts.Token)
+                                            If bytesRead > 0 Then
+                                                Await stream.WriteAsync(buffer, 0, bytesRead, cts.Token)
+                                                流量数据.累计字节数 += bytesRead
                                             End If
-
-                                            ' 更新最后活动时间
-                                            连接.最后活动时间 = DateTime.Now
-                                        End If
-                                    Catch ex As OperationCanceledException
-                                        ' 处理超时或取消
-                                        Exit Do
-                                    Catch ex As IOException
-                                        ' 处理网络错误
-                                        Exit Do
-                                    End Try
-                                Loop While bytesRead > 0
+                                        Catch ex As OperationCanceledException
+                                            Exit Do
+                                        Catch ex As IOException
+                                            Exit Do
+                                        End Try
+                                    Loop While bytesRead > 0
+                                End Using
                             End Using
-                        End Using
+                        End If
+
+                        ' 计算和更新带宽
+                        Dim 经过时间 = (DateTime.Now - 流量数据.开始时间).TotalSeconds
+                        If 经过时间 > 0 Then
+                            Dim 带宽 = (流量数据.累计字节数 / 1024 / 1024) / 经过时间
+                            频道带宽统计.AddOrUpdate(url, 带宽, Function(key, old) 带宽)
+                        End If
+
+                        ' 更新最后活动时间
+                        连接.最后活动时间 = DateTime.Now
+
                     Catch ex As OperationCanceledException
-                        ' 处理超时
                         主窗体引用.添加日志($"TS请求超时: {url}")
                     Catch ex As HttpRequestException
-                        ' 处理HTTP请求错误
                         主窗体引用.添加日志($"TS请求HTTP错误: {ex.Message}")
                     End Try
                 End Using
 
             Catch ex As Exception When TypeOf ex Is SocketException OrElse
-                            TypeOf ex Is ObjectDisposedException OrElse
-                            TypeOf ex Is IOException
-                ' 处理网络相关错误
+                        TypeOf ex Is ObjectDisposedException OrElse
+                        TypeOf ex Is IOException
                 主窗体引用.添加日志($"TS请求网络错误: {ex.Message}")
             Catch ex As Exception
                 主窗体引用.添加日志($"处理TS请求失败: {ex.Message}")
@@ -656,6 +697,23 @@ Namespace IPTV代理转发
 
             Catch ex As Exception
                 主窗体引用.添加日志($"更新带宽统计时出错: {ex.Message}")
+            End Try
+        End Sub
+
+        ' 在处理M3U8请求时预加载下一个TS文件
+        Private Async Sub 预加载TS文件(tsUrl As String)
+            Try
+                Using response = Await httpClient.GetAsync(tsUrl, HttpCompletionOption.ResponseHeadersRead)
+                    response.EnsureSuccessStatusCode()
+                    Using responseStream = Await response.Content.ReadAsStreamAsync()
+                        Using memStream As New MemoryStream()
+                            Await responseStream.CopyToAsync(memStream)
+                            TS预加载缓存.TryAdd(tsUrl, memStream.ToArray())
+                        End Using
+                    End Using
+                End Using
+            Catch ex As Exception
+                主窗体引用.添加日志($"预加载TS文件失败: {ex.Message}")
             End Try
         End Sub
 

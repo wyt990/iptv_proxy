@@ -41,6 +41,7 @@ Namespace IPTV代理转发
         ' 工具栏按钮
         Private ReadOnly 开启代理按钮 As New ToolStripButton("开启代理") With {.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText}
         Private ReadOnly 设置按钮 As New ToolStripButton("设置") With {.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText}
+        Private ReadOnly 打开日志窗口 As New ToolStripButton("打开日志窗口") With {.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText}
 
         ' 添加代理设置的引用
         Private ReadOnly 设置管理器 As 代理设置
@@ -102,7 +103,7 @@ Namespace IPTV代理转发
                 开启停止代理_Click(Nothing, Nothing)
             End If
             ' 显示日志窗口
-            日志窗口实例.Show()
+            '日志窗口实例.Show()
         End Sub
 
         ' 在类销毁时释放 HttpClient
@@ -143,11 +144,12 @@ Namespace IPTV代理转发
         End Sub
 
         Private Sub InitializeToolbar()
-            工具栏.Items.AddRange({开启代理按钮, 设置按钮})
+            工具栏.Items.AddRange({开启代理按钮, 设置按钮, 打开日志窗口})
 
             ' 绑定事件处理程序
             AddHandler 开启代理按钮.Click, AddressOf 开启停止代理_Click
             AddHandler 设置按钮.Click, AddressOf 代理设置_Click
+            AddHandler 打开日志窗口.Click, AddressOf 打开日志窗口_Click
         End Sub
 
         Private Sub InitializeGrid()
@@ -267,7 +269,7 @@ Namespace IPTV代理转发
                 Return Encoding.Unicode
             End If
 
-            ' 尝试检测���否是 UTF8
+            ' 尝试检测是否是 UTF8
             Try
                 Dim utf8String = Encoding.UTF8.GetString(bytes)
                 Dim utf8Bytes = Encoding.UTF8.GetBytes(utf8String)
@@ -311,7 +313,7 @@ Namespace IPTV代理转发
                 End If
             End Using
 
-            ' 更新定时器状��
+            ' 更新定时器状态
             If 代理服务器实例 IsNot Nothing Then
                 代理服务器实例.更新定时器状态()
             End If
@@ -672,10 +674,15 @@ Namespace IPTV代理转发
             End Using
         End Sub
 
+        ' 打开日志窗口相关方法
+        Private Sub 打开日志窗口_Click(sender As Object, e As EventArgs)
+            日志窗口实例.Show()
+        End Sub
+
         ' 关于对话框
         Private Sub 关于_Click(sender As Object, e As EventArgs)
             MessageBox.Show($"IPTV代理转发 v{版本号}" & vbCrLf & vbCrLf &
-                           "作者 Your Name" & vbCrLf &
+                           "作者 五月天" & vbCrLf &
                            "版权所有 © 2024",
                            "关于",
                            MessageBoxButtons.OK,
