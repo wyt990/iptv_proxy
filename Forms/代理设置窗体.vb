@@ -5,6 +5,8 @@ Namespace IPTV代理转发
         Inherits Form
 
         ' 控件声明
+        Private ReadOnly 源检测时间标签 As New Label()
+        Private ReadOnly 源检测时间选择器 As New DateTimePicker()
         Private ReadOnly 监听地址标签 As New Label()
         Private ReadOnly 监听地址输入框 As New TextBox()
         Private ReadOnly 监听端口标签 As New Label()
@@ -96,18 +98,29 @@ Namespace IPTV代理转发
             带宽限制输入框.Location = New Point(150, 167)
             带宽限制输入框.Size = New Size(200, 23)
 
+            ' 源检测时间
+            源检测时间标签.Text = "源检测时间:"
+            源检测时间标签.AutoSize = True
+            源检测时间标签.Location = New Point(20, 200)  ' 调整位置
+
+            源检测时间选择器.Format = DateTimePickerFormat.Time
+            源检测时间选择器.ShowUpDown = True
+            源检测时间选择器.Location = New Point(150, 197)  ' 调整位置
+            源检测时间选择器.Size = New Size(100, 23)
+            源检测时间选择器.Value = DateTime.Parse(设置管理器.源检测时间)
+
             ' 自动启动
             自动启动复选框.Text = "程序启动时自动开启代理"
-            自动启动复选框.Location = New Point(150, 200)
+            自动启动复选框.Location = New Point(150, 230)  ' 调整位置
             自动启动复选框.AutoSize = True
 
             ' 按钮
             确定按钮.Text = "确定"
-            确定按钮.Location = New Point(190, 250)
+            确定按钮.Location = New Point(190, 270)  ' 调整位置
             确定按钮.DialogResult = DialogResult.OK
 
             取消按钮.Text = "取消"
-            取消按钮.Location = New Point(280, 250)
+            取消按钮.Location = New Point(280, 270)  ' 调整位置
             取消按钮.DialogResult = DialogResult.Cancel
 
             ' 添加控件到窗体
@@ -118,9 +131,13 @@ Namespace IPTV代理转发
                 超时时间标签, 超时时间输入框,
                 最大连接数标签, 最大连接数输入框,
                 带宽限制标签, 带宽限制输入框,
+                源检测时间标签, 源检测时间选择器,  ' 添加源检测时间控件
                 自动启动复选框,
                 确定按钮, 取消按钮
             })
+
+            ' 绑定事件
+            AddHandler 源检测时间选择器.ValueChanged, AddressOf 源检测时间_Changed
 
             ' 设置默认按钮
             AcceptButton = 确定按钮
@@ -193,6 +210,12 @@ Namespace IPTV代理转发
         Private Sub 取消按钮_Click(sender As Object, e As EventArgs)
             DialogResult = DialogResult.Cancel
             Close()
+        End Sub
+
+        ' 添加事件处理方法
+        Private Sub 源检测时间_Changed(sender As Object, e As EventArgs)
+            设置管理器.源检测时间 = 源检测时间选择器.Value.ToString("HH:mm")
+            RaiseEvent 设置已更改()
         End Sub
     End Class
 End Namespace 

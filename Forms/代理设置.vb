@@ -18,7 +18,17 @@ Namespace IPTV代理转发
         Public Property 自动启动 As Boolean = False
         Public Property 最大连接数 As Integer = 10
         Public Property 带宽限制 As Integer = 0 ' MB/s, 0表示不限制
-
+        Private Const 源检测时间_Key As String = "源检测时间"
+        Private _源检测时间 As String = "03:00"  ' 默认凌晨3点检测
+        Public Property 源检测时间 As String
+            Get
+                Return _源检测时间
+            End Get
+            Set(value As String)
+                _源检测时间 = value
+                保存设置()
+            End Set
+        End Property
         ' 配置文件路径
         Private ReadOnly 配置文件路径 As String = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -54,6 +64,8 @@ Namespace IPTV代理转发
                                     Integer.TryParse(parts(1).Trim(), 最大连接数)
                                 Case "带宽限制"
                                     Integer.TryParse(parts(1).Trim(), 带宽限制)
+                                Case "源检测时间"
+                                    _源检测时间 = parts(1).Trim()
                             End Select
                         End If
                     Next
@@ -78,6 +90,7 @@ Namespace IPTV代理转发
                     writer.WriteLine($"自动启动={自动启动}")
                     writer.WriteLine($"最大连接数={最大连接数}")
                     writer.WriteLine($"带宽限制={带宽限制}")
+                    writer.WriteLine($"源检测时间={_源检测时间}")
                 End Using
             Catch ex As Exception
                 Throw New Exception("保存设置失败: " & ex.Message)

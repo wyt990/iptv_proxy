@@ -33,6 +33,7 @@ Namespace IPTV代理转发
         ' 代理菜单
         Private ReadOnly 开启停止代理 As New ToolStripMenuItem("开启代理")
         Private ReadOnly 导出代理列表 As New ToolStripMenuItem("导出代理列表...")
+        Private ReadOnly 源URL检测 As New ToolStripMenuItem("源URL检测")
         Private ReadOnly 代理设置 As New ToolStripMenuItem("代理设置...")
 
         ' 帮助菜单项
@@ -54,6 +55,8 @@ Namespace IPTV代理转发
 
         ' 添加频道代理状态的字典
         Private ReadOnly 频道代理状态 As New Dictionary(Of String, Boolean)()
+
+        Private ReadOnly 源检测定时器 As New Timer()
 
         ' 在类级别添加编码注册
         Shared Sub New()
@@ -102,6 +105,10 @@ Namespace IPTV代理转发
             If 设置管理器.自动启动 Then
                 开启停止代理_Click(Nothing, Nothing)
             End If
+            ' 初始化源检测定时器
+            源检测定时器.Interval = 600000  ' 每分钟检查一次
+            AddHandler 源检测定时器.Tick, AddressOf 检查源检测时间
+            源检测定时器.Start()
             ' 显示日志窗口
             '日志窗口实例.Show()
         End Sub
@@ -122,6 +129,7 @@ Namespace IPTV代理转发
 
             ' 代理菜单
             代理菜单.DropDownItems.AddRange({开启停止代理, 导出代理列表,
+                                    New ToolStripSeparator(), 源URL检测,
                                     New ToolStripSeparator(), 代理设置})
 
             ' 帮助菜单
@@ -138,17 +146,19 @@ Namespace IPTV代理转发
 
             AddHandler 开启停止代理.Click, AddressOf 开启停止代理_Click
             AddHandler 导出代理列表.Click, AddressOf 导出代理列表_Click
+            AddHandler 源URL检测.Click, AddressOf 源URL检测_Click
             AddHandler 代理设置.Click, AddressOf 代理设置_Click
 
             AddHandler 关于.Click, AddressOf 关于_Click
         End Sub
 
         Private Sub InitializeToolbar()
-            工具栏.Items.AddRange({开启代理按钮, 设置按钮, 打开日志窗口})
+            工具栏.Items.AddRange({开启代理按钮, 设置按钮, 源URL检测, 打开日志窗口})
 
             ' 绑定事件处理程序
             AddHandler 开启代理按钮.Click, AddressOf 开启停止代理_Click
             AddHandler 设置按钮.Click, AddressOf 代理设置_Click
+            AddHandler 源URL检测.Click, AddressOf 源URL检测_Click
             AddHandler 打开日志窗口.Click, AddressOf 打开日志窗口_Click
         End Sub
 
@@ -204,6 +214,15 @@ Namespace IPTV代理转发
                     .Name = "带宽",
                     .HeaderText = "带宽",
                     .Width = 80
+                },
+                New DataGridViewTextBoxColumn With {
+                    .Name = "源检测时间",
+                    .HeaderText = "源检测时间",
+                    .Width = 80,
+                    .Tag = 0.08,  ' 6%的宽度
+                    .DefaultCellStyle = New DataGridViewCellStyle With {
+                        .Alignment = DataGridViewContentAlignment.MiddleCenter
+                    }
                 }
             })
         End Sub
@@ -465,32 +484,41 @@ Namespace IPTV代理转发
         ' 添加频道可用性检测方法
         Private Async Sub 检测频道可用性(url As String)
             Try
-                Using httpClient As New HttpClient()
-                    httpClient.Timeout = TimeSpan.FromSeconds(5)  ' 设置5秒超时
-                    Await httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead)
-
-                    ' 如果能访问，设置为运行中状态
-                    For Each row As DataGridViewRow In 频道列表.Rows
-                        If row.Cells("频道地址").Value.ToString() = url Then
-                            频道代理状态(url) = True
-                            row.Cells("代理状态").Value = "运行中"
-                            Exit For
-                        End If
-                    Next
-                End Using
-            Catch ex As Exception
-                ' 如果无法访问，设置为已停止状态
+                ' 找到对应的行
+                Dim targetRow As DataGridViewRow = Nothing
                 For Each row As DataGridViewRow In 频道列表.Rows
                     If row.Cells("频道地址").Value.ToString() = url Then
-                        频道代理状态(url) = False
-                        row.Cells("代理状态").Value = "已停止"
-                        row.Cells("连接数").Value = "0"
-                        row.Cells("带宽").Value = "0 MB/s"
+                        targetRow = row
                         Exit For
                     End If
                 Next
+
+                If targetRow Is Nothing Then Return
+
+                ' 更新检测时间
+                If targetRow.Cells("源检测时间").Value Is Nothing OrElse
+                    String.IsNullOrEmpty(targetRow.Cells("源检测时间").Value.ToString()) Then
+                    targetRow.Cells("源检测时间").Value = DateTime.Now.ToString("MM-dd HH:mm")
+                End If
+
+                ' 发送HTTP请求检测可用性
+                Using response = Await httpClient.GetAsync(url)
+                    If response.IsSuccessStatusCode Then
+                        频道代理状态(url) = True
+                        更新频道代理状态(url, "运行中")
+                    Else
+                        频道代理状态(url) = False
+                        更新频道代理状态(url, "已停止")
+                    End If
+                End Using
+
+            Catch ex As Exception
+                添加日志($"检测频道可用性时出错: {ex.Message}")
+                频道代理状态(url) = False
+                更新频道代理状态(url, "已停止")
+            Finally
+                更新状态栏()
             End Try
-            更新状态栏()
         End Sub
 
         ' 修改添加频道方法
@@ -663,6 +691,51 @@ Namespace IPTV代理转发
                     End Try
                 End If
             End Using
+        End Sub
+
+        '源URL检测相关方法
+        Private Sub 源URL检测_Click(sender As Object, e As EventArgs)
+            Try
+                ' 检测所有频道
+                For Each row As DataGridViewRow In 频道列表.Rows
+                    Dim url = row.Cells("频道地址").Value.ToString()
+                    ' 更新检测时间
+                    row.Cells("源检测时间").Value = DateTime.Now.ToString("MM-dd HH:mm")
+                    检测频道可用性(url)
+                Next
+
+                ' 保存检测结果
+                保存检测结果()
+            Catch ex As Exception
+                添加日志($"检测源URL时出错: {ex.Message}")
+                MessageBox.Show($"检测源URL时出错: {ex.Message}", "错误",
+                      MessageBoxButtons.OK, MessageBoxIcon.Error)
+            End Try
+        End Sub
+
+        ' 添加保存检测结果方法
+        Private Sub 保存检测结果()
+            Try
+                Dim 文件路径 = Path.Combine(Application.StartupPath, "检测记录")
+                Directory.CreateDirectory(文件路径)
+
+                Dim 文件名 = Path.Combine(文件路径, $"源检测时间_{DateTime.Now:yyyy-MM-dd}.txt")
+                Using writer As New StreamWriter(文件名, True)
+                    writer.WriteLine($"检测时间: {DateTime.Now:yyyy-MM-dd HH:mm:ss}")
+
+                    For Each row As DataGridViewRow In 频道列表.Rows
+                        Dim 频道名 = row.Cells("频道名称").Value.ToString()
+                        Dim 状态 = row.Cells("代理状态").Value.ToString()
+                        writer.WriteLine($"{频道名}: {状态}")
+                    Next
+
+                    writer.WriteLine("----------------------------------------")
+                End Using
+
+                添加日志($"检测结果已保存到: {文件名}")
+            Catch ex As Exception
+                添加日志($"保存检测结果时出错: {ex.Message}")
+            End Try
         End Sub
 
         ' 代理设置相关方法
@@ -1417,6 +1490,30 @@ Namespace IPTV代理转发
                 MessageBox.Show($"更新代理地址时出错: {ex.Message}", "错误",
                               MessageBoxButtons.OK, MessageBoxIcon.Error)
             End Try
+        End Sub
+
+        ' 添加检查方法
+        Private Sub 检查源检测时间(sender As Object, e As EventArgs)
+            Try
+                Dim 当前时间 = DateTime.Now
+                Dim 检测时间 = DateTime.Parse(设置管理器.源检测时间)
+
+                ' 如果当前时间的小时和分钟与设定时间相同
+                If 当前时间.Hour = 检测时间.Hour AndAlso
+                   当前时间.Minute = 检测时间.Minute Then
+                    ' 执行源检测
+                    源URL检测_Click(Nothing, Nothing)
+                    添加日志($"执行每日源检测 - {当前时间:yyyy-MM-dd HH:mm:ss}")
+                End If
+            Catch ex As Exception
+                添加日志($"检查源检测时间出错: {ex.Message}")
+            End Try
+        End Sub
+
+        ' 在窗体关闭时停止定时器
+        Protected Overrides Sub OnFormClosing(e As FormClosingEventArgs)
+            源检测定时器.Stop()
+            MyBase.OnFormClosing(e)
         End Sub
     End Class
 End Namespace
