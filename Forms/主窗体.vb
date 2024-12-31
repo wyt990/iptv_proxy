@@ -105,8 +105,8 @@ Namespace IPTV代理转发
             If 设置管理器.自动启动 Then
                 开启停止代理_Click(Nothing, Nothing)
             End If
-            ' 初始化源检测定时器
-            源检测定时器.Interval = 600000  ' 每分钟检查一次
+            ' 初始化源检测定时器 - 改为每分钟检查一次
+            源检测定时器.Interval = 60000  ' 每分钟检查一次
             AddHandler 源检测定时器.Tick, AddressOf 检查源检测时间
             源检测定时器.Start()
             ' 显示日志窗口
@@ -1492,28 +1492,36 @@ Namespace IPTV代理转发
             End Try
         End Sub
 
-        ' 添加检查方法
-        Private Sub 检查源检测时间(sender As Object, e As EventArgs)
-            Try
-                Dim 当前时间 = DateTime.Now
-                Dim 检测时间 = DateTime.Parse(设置管理器.源检测时间)
-
-                ' 如果当前时间的小时和分钟与设定时间相同
-                If 当前时间.Hour = 检测时间.Hour AndAlso
-                   当前时间.Minute = 检测时间.Minute Then
-                    ' 执行源检测
-                    源URL检测_Click(Nothing, Nothing)
-                    添加日志($"执行每日源检测 - {当前时间:yyyy-MM-dd HH:mm:ss}")
-                End If
-            Catch ex As Exception
-                添加日志($"检查源检测时间出错: {ex.Message}")
-            End Try
-        End Sub
 
         ' 在窗体关闭时停止定时器
         Protected Overrides Sub OnFormClosing(e As FormClosingEventArgs)
             源检测定时器.Stop()
             MyBase.OnFormClosing(e)
+        End Sub
+
+        Private Sub 检查源检测时间(sender As Object, e As EventArgs)
+            Try
+                Dim 当前时间 = DateTime.Now
+                Dim 检测时间 = DateTime.Parse(设置管理器.源检测时间)
+
+                ' 检查是否是今天第一次运行
+                Static 上次检测日期 As Date = Date.MinValue
+
+                ' 如果当前时间的小时和分钟与设定时间相同，且不是今天已经检测过
+                If 当前时间.Hour = 检测时间.Hour AndAlso
+                   当前时间.Minute = 检测时间.Minute AndAlso
+                   当前时间.Date <> 上次检测日期 Then
+
+                    ' 执行源检测
+                    源URL检测_Click(Nothing, Nothing)
+                    添加日志($"执行每日源检测 - {当前时间:yyyy-MM-dd HH:mm:ss}")
+
+                    ' 更新上次检测日期
+                    上次检测日期 = 当前时间.Date
+                End If
+            Catch ex As Exception
+                添加日志($"检查源检测时间出错: {ex.Message}")
+            End Try
         End Sub
     End Class
 End Namespace
