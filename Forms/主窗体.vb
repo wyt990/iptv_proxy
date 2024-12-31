@@ -11,7 +11,7 @@ Namespace IPTV代理转发
         Inherits Form
 
         ' 添加版本号常量
-        Private Const 版本号 As String = "1.0.002"
+        Private Const 版本号 As String = "1.0.003"
 
         ' 控件声明
         Private ReadOnly 菜单栏 As New MenuStrip()
